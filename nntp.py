@@ -10,7 +10,6 @@ from shorthand import chunks
 import struct
 import time
 from coropipe import PipeWriter
-from warnings import warn
 from misc import Context
 from io import SEEK_CUR
 import socket
@@ -197,10 +196,7 @@ def parse_nzb(stream, include=None):
     rars = dict()
     pars = dict()
     unique_release = None
-    for file in nzb:
-        if file.tag != NZB + "file":
-            warn(UserWarning("Unhandled tag <{}>".format(file.tag)))
-            continue
+    for file in nzb.iterfind(NZB + "file"):
         file = NzbFile(file)
         if unique_release not in (None, file.release):
             raise ValueError(file.release)

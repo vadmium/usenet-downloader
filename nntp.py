@@ -19,7 +19,28 @@ from io import BufferedIOBase
 from functions import attributes
 
 """
+TODO:
+
 specify output file name (for single file dl) or directory name
+os compat file names
+preallocate disk space
+posix_fallocate
+hop nzbs (max hop limit)
+when cancelling body (e.g. file found to be complete), determine whether to
+    abort connection (if a lot to dl), or to do a dummy transfer (small amount
+    to dl)
+option to reconnect after given time, to avoid server inconvenient
+    disconnection
+
+sequentially appended file
+    * file size indicates completion
+    * no truncation needed to resume with basic tool
+    * inefficient for transferring chunks concurrently or out of order
+seek over holes
+pre-allocate space
+    * avoids fragmentation
+    * early indication if not enough space
+    * naive file system zeroing
 """
 
 NZB = "{http://www.newzbin.com/DTD/2003/nzb}"
@@ -356,29 +377,6 @@ class NzbFile:
                     raise ValueError(segment.tag)
                 [id] = segment.itertext()
                 yield (segment, id)
-
-"""
-os compat file names
-preallocate disk space
-posix_fallocate
-hop nzbs (max hop limit)
-exp retry with temp failure (option?)
-when cancelling body (e.g. file found to be complete), determine whether to
-    abort connection (if a lot to dl), or to do a dummy transfer (small amount
-    to dl)
-option to reconnect after given time, to avoid server inconvenient
-    disconnection
-
-sequentially appended file
-    * file size indicates completion
-    * no truncation needed to resume with basic tool
-    * inefficient for transferring chunks concurrently or out of order
-seek over holes
-pre-allocate space
-    * avoids fragmentation
-    * early indication if not enough space
-    * naive file system zeroing
-"""
 
 class Download(Context):
     def __init__(self, path):

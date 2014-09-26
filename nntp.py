@@ -734,21 +734,19 @@ class NntpClient(Context):
         retry = 0
         while True:
             try:
-                try:
-                    with self.handle_abort():
-                        self.nntp.body(id, *pos, **kw)
-                    break
-                except NNTPTemporaryError as err:
-                    [code, *msg] = err.response.split(maxsplit=1)
-                    if code != "400":
-                        raise
-                    [msg] = msg or (None,)
+                with self.handle_abort():
+                    self.nntp.body(id, *pos, **kw)
+                break
             except (NNTPTemporaryError, NNTPPermanentError) as err:
-                if retry:
+                [code, *msg] = err.response.split(maxsplit=1)
+                if code == "400":
+                    [msg] = msg or (None,)
+                    if not msg:
+                        msg = "Server shut down connection"
+                elif code[1] == "0" and not retry:
+                    msg = err.response
+                else:
                     raise
-                msg = err.response
-            if not msg:
-                msg = "Server shut down connection"
             print(msg, file=stderr)
             # TODO: time duration formatter
             stderr.write("Connection lasted {:.0f}m\n".format((time.monotonic() - self.connect_time)/60))

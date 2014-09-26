@@ -11,11 +11,12 @@ import struct
 import time
 from coropipe import PipeWriter
 from misc import Context
-from io import SEEK_CUR
+from io import SEEK_CUR, UnsupportedOperation
 import socket
 import re
 from io import BufferedIOBase
 from functions import attributes
+from warnings import warn
 
 """
 TODO:
@@ -46,21 +47,22 @@ NZB = "{http://www.newzbin.com/DTD/2003/nzb}"
 
 @attributes(param_types=dict(debuglevel=int))
 def main(*include, address=None, id=None, debuglevel=None):
+    log = TerminalLog()
     with ExitStack() as cleanup:
         if address is not None:
             try:
                 # TODO: configurable timeout
-                nntp = NntpClient(address, debuglevel=debuglevel, timeout=60)
+                nntp = NntpClient(log, address, debuglevel=debuglevel, timeout=60)
                 nntp = cleanup.enter_context(nntp)
             except NNTPPermanentError as err:
                 raise SystemExit(err)
             
             if id is not None:
-                return transfer_id(nntp, id)
+                return transfer_id(nntp, log, id)
         
         [release, files, rars, pars] = parse_nzb(stdin.buffer, include)
         
-        session = dict() # TODO: class
+        session = dict(log=log) # TODO: class
         if address is not None:
             session["nntp"] = nntp
         
@@ -70,7 +72,7 @@ def main(*include, address=None, id=None, debuglevel=None):
             prefix = release + " /"
         else:
             prefix = "Total files:"
-        stderr.write("{} {}, ~{}\n".format(prefix, session["files"], size))
+        log.write("{} {}, ~{}\n".format(prefix, session["files"], size))
         
         if release:
             with suppress(FileExistsError):
@@ -88,12 +90,12 @@ def main(*include, address=None, id=None, debuglevel=None):
                     if par is None:
                         continue
                     size = format_size(sum(f.bytes for f in par["files"]))
-                    stderr.write("{}[.vol*{:+}].par2: ~{}\n".format(
+                    log.write("{}[.vol*{:+}].par2: ~{}\n".format(
                         file.par, par["count"], size))
                     pars[file.par] = None
                     continue
                 size = format_size(file.bytes)
-                stderr.write("{}: ~{}\n".format(file.name, size))
+                log.write("{}: ~{}\n".format(file.name, size))
             else:
                 volumes = rars[file.rar]
                 if not volumes:
@@ -105,29 +107,29 @@ def main(*include, address=None, id=None, debuglevel=None):
                     else:
                         ext = "rar"
                     size = format_size(size)
-                    stderr.write("{}.{}: ~{}\n".format(file.rar, ext, size))
+                    log.write("{}.{}: ~{}\n".format(file.rar, ext, size))
                 else:
                     for i in range(len(volumes)):
                         session["file"] += 1
                         volumes[i].transfer(session)
                 rars[file.rar] = None
 
-def transfer_id(nntp, id):
+def transfer_id(nntp, log, id):
     pipe = PipeWriter()
-    with pipe.coroutine(id_receive(pipe)), suppress(BrokenPipeError):
+    with pipe.coroutine(id_receive(log, pipe)), suppress(BrokenPipeError):
         try:
             nntp.body(id, file=pipe)
         except (NNTPTemporaryError, NNTPPermanentError) as err:
             raise SystemExit(err)
         # EOF error: kill receiver and retry a few times
 
-def id_receive(pipe):
+def id_receive(log, pipe):
     if (yield from pipe.consume_match(b"begin ")):
         yield from pipe.read_delimited(b" ", 30)
         name = yield from pipe.read_delimited(b"\n",
             YencFileDecoder.NAME_CHARS)
         name = name.rstrip(b"\r").decode("ascii")
-        with Download(name) as download:
+        with Download(log, name) as download:
             if download.complete:
                 return
             if download.control:
@@ -148,7 +150,7 @@ def id_receive(pipe):
             if (yield from pipe.read_delimited(b"\n", 10)).strip():
                 raise ValueError()
         return
-    decoder = YencFileDecoder(pipe)
+    decoder = YencFileDecoder(log, pipe)
     header = yield from decoder.parse_header()
     if header.get("part") or header.get("total", 1) != 1:
         raise ValueError(header)
@@ -159,12 +161,12 @@ def id_receive(pipe):
     if None not in (size, end) and size != end:
         raise ValueError(header)
     
-    stderr.write("Transferring {}".format(header["name"]))
+    log.write("Transferring {}".format(header["name"]))
     if size is not None:
-        stderr.write(", {}".format(format_size(size)))
-    print(file=stderr)
+        log.write(", {}".format(format_size(size)))
+    log.write("\n")
     
-    with Download(header["name"]) as download:
+    with Download(log, header["name"]) as download:
         if download.complete:
             return
         # TODO: handle omitted size; if given, make sure it is not ridiculously high
@@ -283,16 +285,16 @@ class NzbFile:
     
     def transfer(self, session):
         path = os.path.join(self.release, self.name)
-        with Download(path) as download:
+        with Download(session["log"], path) as download:
             if download.complete:
                 return
             
             bytes = format_size(self.bytes)
-            stderr.write("{} ({}/{}, ~{})\n".format(
+            session["log"].write("{} ({}/{}, ~{})\n".format(
                 self.name, session["file"], session["files"], bytes))
             
             with ExitStack() as cleanup:
-                decoder = YencFileDecoder(PipeWriter())
+                decoder = YencFileDecoder(session["log"], PipeWriter())
                 coroutine = self._receive(download, decoder)
                 cleanup.enter_context(decoder.pipe.coroutine(coroutine))
                 for [segment, id] in self.iter_segments():
@@ -311,14 +313,15 @@ class NzbFile:
                             msg = format(err)
                         else:
                             break
-                        print(msg, file=stderr)
+                        session["log"].write(msg + "\n")
                         # TODO: time duration formatter
-                        stderr.write("Connection lasted {:.0f}m\n".format((time.monotonic() - session["nntp"].connect_time)/60))
+                        session["log"].write("Connection lasted {:.0f}m\n".format((time.monotonic() - session["nntp"].connect_time)/60))
                         decoder.pipe.close()
                         with suppress(EOFError):
                             cleanup.close()
                         session["nntp"].connect()
-                        decoder = YencFileDecoder(PipeWriter())
+                        pipe = PipeWriter()
+                        decoder = YencFileDecoder(session["log"], pipe)
                         coroutine = self._receive(download, decoder)
                         # TODO: should not re-open download etc
                         coroutine = decoder.pipe.coroutine(coroutine)
@@ -367,8 +370,9 @@ class NzbFile:
                 yield (segment, id)
 
 class Download(Context):
-    def __init__(self, path):
+    def __init__(self, log, path):
         # TODO: form OS path and/or validate it
+        self.log = log
         self.path = path
         
         self.control_path = self.path + ".aria2"
@@ -380,10 +384,10 @@ class Download(Context):
             # If data file exists without control file, assume complete
             self.complete = os.path.exists(self.path)
             if self.complete:
-                stderr.write("{}: assuming complete\n".format(self.path))
+                self.log.write("{}: assuming complete\n".format(self.path))
         else:
             try:
-                stderr.write("{}: resuming\n".format(self.path))
+                self.log.write("{}: resuming\n".format(self.path))
                 self.complete = False
                 
                 # TODO: treat truncated file as for new file
@@ -450,7 +454,8 @@ class Download(Context):
             self.file.close()
         if self.control:
             try:
-                stderr.write("\r" + ERASE_EOL)
+                self.log.carriage_return()
+                self.log.clear_eol()
                 if not exc_value:
                     self.control.seek(self.bitfield)
                     pieces = chunks(self.total_length, self.piece_length)
@@ -483,7 +488,8 @@ class Download(Context):
         return bits >> (8 - 1 - bit) & 1
 
 class YencFileDecoder:
-    def __init__(self, pipe):
+    def __init__(self, log, pipe):
+        self.log = log
         self.pipe = pipe
     
     def parse_header(self):
@@ -609,9 +615,11 @@ class YencFileDecoder:
                         # TODO: round progress pc down so 100% means exactly done
                         # Flexible units for rate
                         # keep samples over multiple parts
-                        stderr.write("\r{}{:5.1%}{:6.0f}kB/s{:5}m{:02}s".format(
-                            ERASE_EOL, progress, rate / 1000, -int(min), int(sec)))
-                        stderr.flush()
+                        self.log.carriage_return()
+                        self.log.clear_eol()
+                        self.log.write("{:5.1%}{:6.0f}kB/s{:5}m{:02}s".format(
+                            progress, rate / 1000, -int(min), int(sec)))
+                        self.log.flush()
         if file.tell() != header["end"]:
             raise ValueError(header["end"])
         
@@ -691,7 +699,8 @@ except ImportError:
         TABLE = TABLE[-42:] + TABLE[:-42]
 
 class NntpClient(Context):
-    def __init__(self, address, *, debuglevel=None, **timeout):
+    def __init__(self, log, address, *, debuglevel=None, **timeout):
+        self.log = log
         self.address = net.Url(netloc=address)
         self.debuglevel = debuglevel
         self.timeout = timeout
@@ -700,7 +709,7 @@ class NntpClient(Context):
     
     def connect(self):
         address = net.format_addr((self.address.hostname, self.address.port))
-        stderr.write("Connecting to {}\n".format(address))
+        self.log.write("Connecting to {}\n".format(address))
         if self.address.port is None:
             port = ()
         else:
@@ -714,11 +723,11 @@ class NntpClient(Context):
             self.nntp.getwelcome()
             
             if self.address.username is not None:
-                stderr.write("Logging in\n")
+                self.log.write("Logging in\n")
                 with self.handle_abort():
                     self.nntp.login(self.address.username,
                         self.address.password)
-            stderr.write("Connected\n")
+            self.log.write("Connected\n")
             cleanup.pop_all()
     
     def body(self, id, *pos, **kw):
@@ -739,9 +748,9 @@ class NntpClient(Context):
                     msg = err.response
                 else:
                     raise
-            print(msg, file=stderr)
+            self.log.write(msg + "\n")
             # TODO: time duration formatter
-            stderr.write("Connection lasted {:.0f}m\n".format((time.monotonic() - self.connect_time)/60))
+            self.log.write("Connection lasted {:.0f}m\n".format((time.monotonic() - self.connect_time)/60))
             if retry >= 60:
                 raise TimeoutError()
             self.close()
@@ -776,8 +785,65 @@ class NntpClient(Context):
             pass
         self.nntp = None
 
-CSI = "\x1B["
-ERASE_EOL = CSI + "K"
+class TerminalLog:
+    def __init__(self):
+        # Defaults
+        self.tty = False
+        self.curses = None
+        
+        if not stderr:
+            return
+        try:
+            if not stderr.buffer.isatty():
+                raise UnsupportedOperation()
+        except (AttributeError, UnsupportedOperation):
+            return
+        
+        self.tty = True
+        try:
+            import curses
+        except ImportError:
+            return
+        self.write(str())
+        self.flush()
+        termstr = os.getenv("TERM", "")
+        fd = stderr.buffer.fileno()
+        try:
+            curses.setupterm(termstr, fd)
+        except curses.error as err:
+            warn(err)
+        self.curses = curses
+    
+    def write(self, text):
+        if stderr:
+            stderr.write(text)
+            self.flushed = False
+    
+    def flush(self):
+        if stderr and not self.flushed:
+            stderr.flush()
+            self.flushed = True
+    
+    def carriage_return(self):
+        if self.curses:
+            self.tput("cr")
+        elif self.tty:
+            self.write("\r")
+        else:
+            self.write("\n")
+    
+    def clear_eol(self):
+        return self.tput("el")
+    
+    def tput(self, capname):
+        if not self.curses:
+            return
+        string = self.curses.tigetstr(capname)
+        segs = string.split(b"$<")
+        string = segs[0]
+        string += bytes().join(s.split(b">", 1)[1] for s in segs[1:])
+        self.flush()
+        stderr.buffer.write(string)
 
 def format_size(size):
     """

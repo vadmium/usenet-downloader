@@ -5,7 +5,7 @@ from sys import stdin, stderr
 from xml.etree import ElementTree
 from fnmatch import fnmatchcase
 import os, os.path
-from contextlib import ExitStack, contextmanager, closing
+from contextlib import ExitStack, contextmanager, closing, suppress
 from shorthand import chunks
 import struct
 import time
@@ -73,10 +73,8 @@ def main(*include, address=None, id=None, debuglevel=None):
         stderr.write("{} {}, ~{}\n".format(prefix, session["files"], size))
         
         if release:
-            try:
+            with suppress(FileExistsError):
                 os.mkdir(release)
-            except FileExistsError:
-                pass
         
         session["file"] = 0
         for file in files:
@@ -116,13 +114,11 @@ def main(*include, address=None, id=None, debuglevel=None):
 
 def transfer_id(nntp, id):
     pipe = PipeWriter()
-    with pipe.coroutine(id_receive(pipe)):
+    with pipe.coroutine(id_receive(pipe)), suppress(BrokenPipeError):
         try:
             nntp.body(id, file=pipe)
         except (NNTPTemporaryError, NNTPPermanentError) as err:
             raise SystemExit(err)
-        except BrokenPipeError:
-            pass
         # EOF error: kill receiver and retry a few times
 
 def id_receive(pipe):
@@ -213,10 +209,8 @@ def parse_nzb(stream, include=None):
         if ext == ["rar"]:
             i = 0
         if ext and ext[0][0] == "r":
-            try:
+            with suppress(ValueError):
                 i = 1 + int(ext[0][1:])
-            except ValueError:
-                pass
         if i is None:
             file.rar = None
         else:
@@ -321,10 +315,8 @@ class NzbFile:
                         # TODO: time duration formatter
                         stderr.write("Connection lasted {:.0f}m\n".format((time.monotonic() - session["nntp"].connect_time)/60))
                         decoder.pipe.close()
-                        try:
+                        with suppress(EOFError):
                             cleanup.close()
-                        except EOFError:
-                            pass
                         session["nntp"].connect()
                         decoder = YencFileDecoder(PipeWriter())
                         coroutine = self._receive(download, decoder)
@@ -778,11 +770,10 @@ class NntpClient(Context):
     def close(self):
         if not self.nntp:
             return
-        try:
-            with self.nntp:
-                pass
-        except NNTPError:
-            pass  # Ignore failure of inappropriate QUIT command
+        
+        # Ignore failure of inappropriate QUIT command
+        with suppress(NNTPError), self.nntp:
+            pass
         self.nntp = None
 
 CSI = "\x1B["

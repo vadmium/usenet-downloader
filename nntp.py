@@ -1,7 +1,7 @@
 import net
 from nntplib import NNTP, NNTPTemporaryError, NNTPPermanentError, NNTPError
 from shorthand import bitmask
-from sys import stdin, stderr
+from sys import stdin, stderr, stdout
 from xml.etree import ElementTree
 from fnmatch import fnmatchcase
 import os, os.path
@@ -46,7 +46,7 @@ pre-allocate space
 NZB = "{http://www.newzbin.com/DTD/2003/nzb}"
 
 @attributes(param_types=dict(debuglevel=int))
-def main(*include, address=None, id=None, debuglevel=None):
+def main(*include, address=None, id=None, debuglevel=None, body=None):
     log = TerminalLog()
     with ExitStack() as cleanup:
         if address is not None:
@@ -57,6 +57,8 @@ def main(*include, address=None, id=None, debuglevel=None):
             except NNTPPermanentError as err:
                 raise SystemExit(err)
             
+            if body is not None:
+                return transfer_body(nntp, body)
             if id is not None:
                 return transfer_id(nntp, log, id)
         
@@ -174,6 +176,12 @@ def id_receive(log, pipe):
         if not download.is_done(0):
             yield from decoder.decode_part(download.file, header)
             download.set_done(0)
+
+def transfer_body(nntp, id):
+    try:
+        nntp.body(id, file=stdout.buffer)
+    except (NNTPTemporaryError, NNTPPermanentError) as err:
+        raise SystemExit(err)
 
 def parse_nzb(stream, include=None):
     nzb = ElementTree.parse(stream).getroot()

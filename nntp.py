@@ -126,6 +126,13 @@ def transfer_id(nntp, log, id):
         # EOF error: kill receiver and retry a few times
 
 def id_receive(log, pipe):
+    while True:
+        stripped = pipe.buffer.lstrip(b"\r\n")
+        if stripped:
+            break
+        pipe.buffer = yield
+    pipe.buffer = stripped
+    
     if (yield from pipe.consume_match(b"begin ")):
         yield from pipe.read_delimited(b" ", 30)
         name = yield from pipe.read_delimited(b"\n",
@@ -507,6 +514,13 @@ class YencFileDecoder:
         # TODO: handle extra parameters
         # TODO: possibility to emit notices about unhandled parameters
         try:
+            while True:
+                stripped = self.pipe.buffer.lstrip(b"\r\n")
+                if stripped:
+                    break
+                self.pipe.buffer = yield
+            self.pipe.buffer = stripped
+            
             yield from self.pipe.expect(b"=ybegin part=")
         except EOFError:
             return None

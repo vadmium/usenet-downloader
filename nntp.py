@@ -524,12 +524,14 @@ class YencFileDecoder:
             yield from self.pipe.expect(b"=ybegin part=")
         except EOFError:
             return None
-        header["part"] = yield from self.pipe.read_delimited(b" total=",
+        header["part"] = yield from self.pipe.read_delimited(b" ",
             self.PART_DIGITS)
         header["part"] = int(header["part"]) - 1
-        header["total"] = yield from self.pipe.read_delimited(
-            b" line=128 size=", self.PART_DIGITS)
-        header["total"] = int(header["total"])
+        if (yield from self.pipe.consume_match(b"total=")):
+            header["total"] = yield from self.pipe.read_delimited(
+                b" ", self.PART_DIGITS)
+            header["total"] = int(header["total"])
+        yield from self.pipe.expect(b"line=128 size=")
         header["size"] = yield from self.pipe.read_delimited(b" name=",
             self.SIZE_DIGITS)
         header["size"] = int(header["size"])

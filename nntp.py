@@ -79,6 +79,8 @@ def main(command, *args, address=None, server=None, debuglevel=None):
             return transfer_id(nntp, log, *args)
         if command == "over":
             return over(nntp, log, *args)
+        if command == "hdr":
+            return hdr(nntp, log, *args)
         if command != "nzb":
             raise SystemExit("Unknown command {!r}".format(command))
         
@@ -208,6 +210,10 @@ def over(nntp, log, group, first=None, last=None):
         message_spec = (int(first), None)
     log.write("{}\n".format(nntp.group(group)[0]))
     nntp.over(message_spec, file=stdout.buffer)
+
+def hdr(nntp, log, group, *pos, **kw):
+    log.write("{}\n".format(nntp.group(group)[0]))
+    nntp.hdr(*pos, file=stdout.buffer, **kw)
 
 def parse_nzb(stream, include=None):
     nzb = ElementTree.parse(stream).getroot()
@@ -809,6 +815,9 @@ class NntpClient(Context):
     def over(self, *pos, **kw):
         with self.handle_abort():
             return self.nntp.over(*pos, **kw)
+    def hdr(self, *pos, **kw):
+        with self.handle_abort():
+            return self.nntp.xhdr(*pos, **kw)
     
     @contextmanager
     def handle_abort(self):

@@ -47,7 +47,7 @@ pre-allocate space
 NZB = "{http://www.newzbin.com/DTD/2003/nzb}"
 
 @attributes(param_types=dict(debuglevel=int))
-def main(*include, address=None, server=None, id=None, debuglevel=None):
+def main(command, *args, address=None, server=None, debuglevel=None):
     if address is not None:
         address = net.Url(netloc=address)
         port = address.port
@@ -74,11 +74,13 @@ def main(*include, address=None, server=None, id=None, debuglevel=None):
                 nntp = cleanup.enter_context(nntp)
             except NNTPPermanentError as err:
                 raise SystemExit(err)
-            
-            if id is not None:
-                return transfer_id(nntp, log, id)
         
-        [release, files, rars, pars] = parse_nzb(stdin.buffer, include)
+        if command == "decode":
+            return transfer_id(nntp, log, *args)
+        if command != "nzb":
+            raise SystemExit("Unknown command {!r}".format(command))
+        
+        [release, files, rars, pars] = parse_nzb(stdin.buffer, args)
         
         session = dict(log=log) # TODO: class
         if address is not None:

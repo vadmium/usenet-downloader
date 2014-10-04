@@ -1,7 +1,7 @@
 import net
 from nntplib import NNTP, NNTPTemporaryError, NNTPPermanentError, NNTPError
 from shorthand import bitmask
-from sys import stdin, stderr
+from sys import stdin, stderr, stdout
 from xml.etree import ElementTree
 from fnmatch import fnmatchcase
 import os, os.path
@@ -77,6 +77,8 @@ def main(command, *args, address=None, server=None, debuglevel=None):
         
         if command == "decode":
             return transfer_id(nntp, log, *args)
+        if command == "over":
+            return over(nntp, log, *args)
         if command != "nzb":
             raise SystemExit("Unknown command {!r}".format(command))
         
@@ -194,6 +196,18 @@ def id_receive(log, pipe):
         if not download.is_done(0):
             yield from decoder.decode_part(download.file, header)
             download.set_done(0)
+
+def over(nntp, log, group, first=None, last=None):
+    if first is None:
+        message_spec = None
+    elif last is None:
+        message_spec = first
+    elif last:
+        message_spec = (int(first), int(last))
+    else:
+        message_spec = (int(first), None)
+    log.write("{}\n".format(nntp.group(group)[0]))
+    nntp.over(message_spec, file=stdout.buffer)
 
 def parse_nzb(stream, include=None):
     nzb = ElementTree.parse(stream).getroot()
@@ -788,6 +802,13 @@ class NntpClient(Context):
                 retry = time.monotonic() - start
                 if retry <= 0:
                     retry = 0.5
+    
+    def group(self, *pos, **kw):
+        with self.handle_abort():
+            return self.nntp.group(*pos, **kw)
+    def over(self, *pos, **kw):
+        with self.handle_abort():
+            return self.nntp.over(*pos, **kw)
     
     @contextmanager
     def handle_abort(self):

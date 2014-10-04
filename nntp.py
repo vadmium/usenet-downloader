@@ -17,6 +17,7 @@ import re
 from io import BufferedIOBase
 from functions import attributes
 from warnings import warn
+from configparser import ConfigParser
 
 """
 TODO:
@@ -46,13 +47,30 @@ pre-allocate space
 NZB = "{http://www.newzbin.com/DTD/2003/nzb}"
 
 @attributes(param_types=dict(debuglevel=int))
-def main(*include, address=None, id=None, debuglevel=None):
+def main(*include, address=None, server=None, id=None, debuglevel=None):
+    if address is not None:
+        address = net.Url(netloc=address)
+        port = address.port
+        username = address.username
+        password = address.password
+    elif server is not None:
+        config = ConfigParser(interpolation=None)
+        with open("nntp.ini") as file:
+            config.read_file(file)
+        server = config["server_" + server]
+        address = net.Url(netloc=server["host"])
+        port = server.get("port") or address.port
+        username = server.get("username") or address.username
+        password = server.get("password") or address.password
+    
     log = TerminalLog()
     with ExitStack() as cleanup:
         if address is not None:
             try:
                 # TODO: configurable timeout
-                nntp = NntpClient(log, address, debuglevel=debuglevel, timeout=60)
+                nntp = NntpClient(log,
+                    address.hostname, port, username, password,
+                    debuglevel=debuglevel, timeout=60)
                 nntp = cleanup.enter_context(nntp)
             except NNTPPermanentError as err:
                 raise SystemExit(err)
@@ -699,34 +717,38 @@ except ImportError:
         TABLE = TABLE[-42:] + TABLE[:-42]
 
 class NntpClient(Context):
-    def __init__(self, log, address, *, debuglevel=None, **timeout):
+    def __init__(self, log,
+    hostname, port=None, username=None, password=None, *,
+    debuglevel=None, **timeout):
         self.log = log
-        self.address = net.Url(netloc=address)
+        self.hostname = hostname
+        self.port = port
+        self.username = username
+        self.password = password
         self.debuglevel = debuglevel
         self.timeout = timeout
         Context.__init__(self)
         self.connect()
     
     def connect(self):
-        address = net.format_addr((self.address.hostname, self.address.port))
+        address = net.format_addr((self.hostname, self.port))
         self.log.write("Connecting to {}\n".format(address))
-        if self.address.port is None:
+        if self.port is None:
             port = ()
         else:
-            port = (self.address.port,)
+            port = (self.port,)
         self.connect_time = time.monotonic()
-        self.nntp = NNTP(self.address.hostname, *port, **self.timeout)
+        self.nntp = NNTP(self.hostname, *port, **self.timeout)
         with ExitStack() as cleanup:
             cleanup.push(self)
             if self.debuglevel is not None:
                 self.nntp.set_debuglevel(self.debuglevel)
             self.nntp.getwelcome()
             
-            if self.address.username is not None:
+            if self.username is not None:
                 self.log.write("Logging in\n")
                 with self.handle_abort():
-                    self.nntp.login(self.address.username,
-                        self.address.password)
+                    self.nntp.login(self.username, self.password)
             self.log.write("Connected\n")
             cleanup.pop_all()
     

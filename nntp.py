@@ -54,9 +54,20 @@ def main(command, *args, address=None, server=None, debuglevel=None):
         username = address.username
         password = address.password
     elif server is not None:
+        user_config = os.getenv("XDG_CONFIG_HOME")
+        if not user_config:
+            user_config = os.getenv("APPDATA")
+            if user_config is None:
+                user_config = os.path.expanduser("~")
+                user_config = os.path.join(user_config, ".config")
+        dirs = os.getenv("XDG_CONFIG_DIRS")
+        dirs = (dirs or "/etc/xdg").split(os.pathsep)
+        
+        files = [os.path.join(user_config, "nntp.ini")]
+        files.extend(os.path.join(d, "nntp.ini") for d in dirs)
+        
         config = ConfigParser(interpolation=None)
-        with open("nntp.ini") as file:
-            config.read_file(file)
+        config.read(files)
         server = config["server_" + server]
         address = net.Url(netloc=server["host"])
         port = server.get("port") or address.port

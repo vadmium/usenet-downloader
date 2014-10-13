@@ -18,6 +18,7 @@ from io import BufferedIOBase
 from functions import attributes
 from warnings import warn
 from configparser import ConfigParser
+from functions import setitem
 
 """
 TODO:
@@ -46,8 +47,9 @@ pre-allocate space
 
 NZB = "{http://www.newzbin.com/DTD/2003/nzb}"
 
-@attributes(param_types=dict(debuglevel=int))
-def main(command, *args, address=None, server=None, debuglevel=None):
+@attributes(param_types=dict(debuglevel=int), cli_context=True)
+@contextmanager
+def main(address=None, server=None, debuglevel=None):
     if address is not None:
         address = net.Url(netloc=address)
         port = address.port
@@ -74,32 +76,58 @@ def main(command, *args, address=None, server=None, debuglevel=None):
         username = server.get("username") or address.username
         password = server.get("password") or address.password
     
-    log = TerminalLog()
+    main = Main()
     with ExitStack() as cleanup:
-        if address is not None:
+        if address is None:
+            main.nntp = None
+        else:
             try:
                 # TODO: configurable timeout
-                nntp = NntpClient(log,
+                main.nntp = NntpClient(main.log,
                     address.hostname, port, username, password,
                     debuglevel=debuglevel, timeout=60)
-                nntp = cleanup.enter_context(nntp)
+                main.nntp = cleanup.enter_context(main.nntp)
             except NNTPPermanentError as err:
                 raise SystemExit(err)
+        yield main
+
+@setitem(vars(main), "subcommand_class")
+class Main:
+    def __init__(self):
+        self.log = TerminalLog()
+    
+    def decode(self, id):
+        pipe = PipeWriter()
+        with pipe.coroutine(id_receive(self.log, pipe)), \
+        suppress(BrokenPipeError):
+            try:
+                self.nntp.body(id, file=pipe)
+            except (NNTPTemporaryError, NNTPPermanentError) as err:
+                raise SystemExit(err)
+            # EOF error: kill receiver and retry a few times
+    
+    def over(self, group, first=None, last=None):
+        if first is None:
+            message_spec = None
+        elif last is None:
+            message_spec = first
+        elif last:
+            message_spec = (int(first), int(last))
+        else:
+            message_spec = (int(first), None)
+        self.log.write("{}\n".format(self.nntp.group(group)[0]))
+        self.nntp.over(message_spec, file=stdout.buffer)
+    
+    def hdr(self, group, *pos, **kw):
+        self.log.write("{}\n".format(self.nntp.group(group)[0]))
+        self.nntp.hdr(*pos, file=stdout.buffer, **kw)
+    
+    def nzb(self, *include):
+        [release, files, rars, pars] = parse_nzb(stdin.buffer, include)
         
-        if command == "decode":
-            return transfer_id(nntp, log, *args)
-        if command == "over":
-            return over(nntp, log, *args)
-        if command == "hdr":
-            return hdr(nntp, log, *args)
-        if command != "nzb":
-            raise SystemExit("Unknown command {!r}".format(command))
-        
-        [release, files, rars, pars] = parse_nzb(stdin.buffer, args)
-        
-        session = dict(log=log) # TODO: class
-        if address is not None:
-            session["nntp"] = nntp
+        session = dict(log=self.log) # TODO: class
+        if self.nntp:
+            session["nntp"] = self.nntp
         
         [session["files"], session["size"]] = count_files(files, rars)
         size = format_size(session["size"])
@@ -107,7 +135,7 @@ def main(command, *args, address=None, server=None, debuglevel=None):
             prefix = release + " /"
         else:
             prefix = "Total files:"
-        log.write("{} {}, ~{}\n".format(prefix, session["files"], size))
+        self.log.write("{} {}, ~{}\n".format(prefix, session["files"], size))
         
         if release:
             with suppress(FileExistsError):
@@ -116,7 +144,7 @@ def main(command, *args, address=None, server=None, debuglevel=None):
         session["file"] = 0
         for file in files:
             if file.rar is None:
-                if address is not None:
+                if self.nntp:
                     session["file"] += 1
                     file.transfer(session)
                     continue
@@ -125,38 +153,29 @@ def main(command, *args, address=None, server=None, debuglevel=None):
                     if par is None:
                         continue
                     size = format_size(sum(f.bytes for f in par["files"]))
-                    log.write("{}[.vol*{:+}].par2: ~{}\n".format(
+                    self.log.write("{}[.vol*{:+}].par2: ~{}\n".format(
                         file.par, par["count"], size))
                     pars[file.par] = None
                     continue
                 size = format_size(file.bytes)
-                log.write("{}: ~{}\n".format(file.name, size))
+                self.log.write("{}: ~{}\n".format(file.name, size))
             else:
                 volumes = rars[file.rar]
                 if not volumes:
                     continue
-                if address is None:
+                if self.nntp:
+                    for i in range(len(volumes)):
+                        session["file"] += 1
+                        volumes[i].transfer(session)
+                else:
                     size = sum(v.bytes for v in volumes.values())
                     if len(volumes) > 1:
                         ext = "rar-r{:02}".format(len(volumes) - 1)
                     else:
                         ext = "rar"
                     size = format_size(size)
-                    log.write("{}.{}: ~{}\n".format(file.rar, ext, size))
-                else:
-                    for i in range(len(volumes)):
-                        session["file"] += 1
-                        volumes[i].transfer(session)
+                    self.log.write("{}.{}: ~{}\n".format(file.rar, ext, size))
                 rars[file.rar] = None
-
-def transfer_id(nntp, log, id):
-    pipe = PipeWriter()
-    with pipe.coroutine(id_receive(log, pipe)), suppress(BrokenPipeError):
-        try:
-            nntp.body(id, file=pipe)
-        except (NNTPTemporaryError, NNTPPermanentError) as err:
-            raise SystemExit(err)
-        # EOF error: kill receiver and retry a few times
 
 def id_receive(log, pipe):
     if (yield from pipe.consume_match(b"begin ")):
@@ -209,22 +228,6 @@ def id_receive(log, pipe):
         if not download.is_done(0):
             yield from decoder.decode_part(download.file, header)
             download.set_done(0)
-
-def over(nntp, log, group, first=None, last=None):
-    if first is None:
-        message_spec = None
-    elif last is None:
-        message_spec = first
-    elif last:
-        message_spec = (int(first), int(last))
-    else:
-        message_spec = (int(first), None)
-    log.write("{}\n".format(nntp.group(group)[0]))
-    nntp.over(message_spec, file=stdout.buffer)
-
-def hdr(nntp, log, group, *pos, **kw):
-    log.write("{}\n".format(nntp.group(group)[0]))
-    nntp.hdr(*pos, file=stdout.buffer, **kw)
 
 def parse_nzb(stream, include=None):
     nzb = ElementTree.parse(stream).getroot()

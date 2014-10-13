@@ -634,7 +634,7 @@ class YencFileDecoder:
                 raise ValueError(header["end"])
     
     def decode_part(self, file, header):
-        # TODO: limit decoded data to (end - begin), or size of not partial, or some hard-coded limit if no size given
+        # TODO: limit decoded data to (end - begin), or size if not partial, or some hard-coded limit if no size given
         file.seek(header["begin"])
         # TODO: do not allow =y lines, newlines, etc to exceed data bytes by say 100
         progress = Progress(self.log, header["size"], header["begin"])

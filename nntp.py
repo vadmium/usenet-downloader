@@ -96,6 +96,12 @@ class Main:
     def __init__(self):
         self.log = TerminalLog()
     
+    def body(self, id):
+        try:
+            self.nntp.body(id, file=stdout.buffer)
+        except (NNTPTemporaryError, NNTPPermanentError) as err:
+            raise SystemExit(err)
+    
     def decode(self, id):
         pipe = PipeWriter()
         with pipe.coroutine(id_receive(self.log, pipe)), \
@@ -178,6 +184,13 @@ class Main:
                 rars[file.rar] = None
 
 def id_receive(log, pipe):
+    while True:
+        stripped = pipe.buffer.lstrip(b"\r\n")
+        if stripped:
+            break
+        pipe.buffer = yield
+    pipe.buffer = stripped
+    
     if (yield from pipe.consume_match(b"begin ")):
         yield from pipe.read_delimited(b" ", 30)
         name = yield from pipe.read_delimited(b"\n",
@@ -553,15 +566,24 @@ class YencFileDecoder:
         # TODO: handle extra parameters
         # TODO: possibility to emit notices about unhandled parameters
         try:
+            while True:
+                stripped = self.pipe.buffer.lstrip(b"\r\n")
+                if stripped:
+                    break
+                self.pipe.buffer = yield
+            self.pipe.buffer = stripped
+            
             yield from self.pipe.expect(b"=ybegin part=")
         except EOFError:
             return None
-        header["part"] = yield from self.pipe.read_delimited(b" total=",
+        header["part"] = yield from self.pipe.read_delimited(b" ",
             self.PART_DIGITS)
         header["part"] = int(header["part"]) - 1
-        header["total"] = yield from self.pipe.read_delimited(
-            b" line=128 size=", self.PART_DIGITS)
-        header["total"] = int(header["total"])
+        if (yield from self.pipe.consume_match(b"total=")):
+            header["total"] = yield from self.pipe.read_delimited(
+                b" ", self.PART_DIGITS)
+            header["total"] = int(header["total"])
+        yield from self.pipe.expect(b"line=128 size=")
         header["size"] = yield from self.pipe.read_delimited(b" name=",
             self.SIZE_DIGITS)
         header["size"] = int(header["size"])

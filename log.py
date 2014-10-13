@@ -2,6 +2,7 @@ from sys import stderr
 import os
 from io import UnsupportedOperation
 from warnings import warn
+import time
 
 class TerminalLog:
     def __init__(self):
@@ -94,3 +95,47 @@ def format_size(size):
             return "{}.{} {}B".format(int, fract * 10 // multiple, prefix)
         ndigits -= 1
     return "{} {}B".format(rounded // multiple, prefix)
+
+class Progress:
+    SAMPLES = 30
+    # TODO: try keeping samples for say up to 10 s, but drop samples
+    # that are older than 10 s rather than having a fixed # of samples
+    
+    def __init__(self, log, total, progress=0):
+        self.log = log
+        self.total = total
+        self.last = time.monotonic()
+        self.samples = [(self.last, progress)] * self.SAMPLES
+        self.sample = 0
+    
+    def update(self, progress):
+        now = time.monotonic()
+        interval = now - self.last
+        if interval < 0.1:
+            return
+        self.last = now
+        [then, prev] = self.samples[self.sample]
+        rate = (progress - prev) / (now - then)
+        self.samples[self.sample] = (now, progress)
+        self.sample = (self.sample + 1) % self.SAMPLES
+        # TODO: detect non terminal, including IDLE; allow this determination to be overridden
+        if rate:
+            eta = (self.total - progress) / rate
+        if rate and eta < 9999 * 60 + 59:
+            [min, sec] = divmod(eta, 60)
+        else:
+            min = 9999
+            sec = 99
+        progress /= self.total
+        # TODO: round progress pc down so 100% means exactly done
+        # Flexible units for rate
+        self.log.carriage_return()
+        self.log.clear_eol()
+        self.log.write("{:5.1%}{:6.0f}kB/s{:5}m{:02}s".format(
+            progress, rate / 1000, -int(min), int(sec)))
+        self.log.flush()
+    
+    @classmethod
+    def close(cls, log):
+        log.carriage_return()
+        log.clear_eol()

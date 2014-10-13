@@ -20,6 +20,7 @@ from configparser import ConfigParser
 from functions import setitem
 from log import TerminalLog
 from log import format_size
+from log import Progress
 
 """
 TODO:
@@ -522,8 +523,7 @@ class Download(Context):
             self.file.close()
         if self.control:
             try:
-                self.log.carriage_return()
-                self.log.clear_eol()
+                Progress.close(self.log)
                 if not exc_value:
                     self.control.seek(self.bitfield)
                     pieces = chunks(self.total_length, self.piece_length)
@@ -637,12 +637,7 @@ class YencFileDecoder:
         # TODO: limit decoded data to (end - begin), or size of not partial, or some hard-coded limit if no size given
         file.seek(header["begin"])
         # TODO: do not allow =y lines, newlines, etc to exceed data bytes by say 100
-        SAMPLES = 30
-        # TODO: try keeping samples for say up to 10 s, but drop samples
-        # that are older than 10 s rather than having a fixed # of samples
-        last = time.monotonic()
-        samples = [(last, header["begin"])] * SAMPLES
-        sample = 0
+        progress = Progress(self.log, header["size"], header["begin"])
         with closing(YencStreamDecoder(UnclosingWriter(file))) as decoder:
             while True:
                 data = self.pipe.buffer
@@ -669,34 +664,9 @@ class YencFileDecoder:
                         break
                 else:
                     self.pipe.buffer = yield
-                    
-                    now = time.monotonic()
-                    interval = now - last
-                    if interval >= 0.1:
-                        last = now
-                        progress = file.tell()
-                        [then, prev] = samples[sample]
-                        rate = (progress - prev) / (now - then)
-                        samples[sample] = (now, progress)
-                        sample = (sample + 1) % SAMPLES
-                        # TODO: incorporate into total of all files; update total of all files with real file size
-                        # TODO: detect non terminal, including IDLE; allow this determination to be overridden
-                        if rate:
-                            eta = (header["size"] - progress) / rate
-                        if rate and eta < 9999 * 60 + 59:
-                            [min, sec] = divmod(eta, 60)
-                        else:
-                            min = 9999
-                            sec = 99
-                        progress = progress / header["size"]
-                        # TODO: round progress pc down so 100% means exactly done
-                        # Flexible units for rate
-                        # keep samples over multiple parts
-                        self.log.carriage_return()
-                        self.log.clear_eol()
-                        self.log.write("{:5.1%}{:6.0f}kB/s{:5}m{:02}s".format(
-                            progress, rate / 1000, -int(min), int(sec)))
-                        self.log.flush()
+                    progress.update(file.tell())
+                    # TODO: incorporate into total of all files; update total of all files with real file size
+                    # TODO: keep samples over multiple parts
         if file.tell() != header["end"]:
             raise ValueError(header["end"])
         

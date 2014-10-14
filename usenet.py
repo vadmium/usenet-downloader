@@ -7,7 +7,6 @@ import os, os.path
 from contextlib import ExitStack, contextmanager, closing, suppress
 from shorthand import chunks
 import struct
-import time
 from coropipe import PipeWriter
 from misc import Context
 from io import SEEK_CUR
@@ -20,7 +19,7 @@ from functions import setitem
 from log import TerminalLog
 from log import format_size
 from log import Progress
-from nntp import NntpClient, NNTPTemporaryError, NNTPPermanentError
+import nntp
 
 """
 TODO:
@@ -80,11 +79,11 @@ def main(address=None, server=None, debuglevel=None):
         else:
             try:
                 # TODO: configurable timeout
-                main.nntp = NntpClient(main.log,
+                main.nntp = nntp.Client(main.log,
                     address.hostname, port, username, password,
                     debuglevel=debuglevel, timeout=60)
                 main.nntp = cleanup.enter_context(main.nntp)
-            except NNTPPermanentError as err:
+            except nntp.NNTPPermanentError as err:
                 raise SystemExit(err)
         yield main
 
@@ -96,7 +95,7 @@ class Main:
     def body(self, id):
         try:
             self.nntp.body(id, file=stdout.buffer)
-        except (NNTPTemporaryError, NNTPPermanentError) as err:
+        except nntp.failure_responses as err:
             raise SystemExit(err)
     
     def decode(self, id):
@@ -105,7 +104,7 @@ class Main:
         suppress(BrokenPipeError):
             try:
                 self.nntp.body(id, file=pipe)
-            except (NNTPTemporaryError, NNTPPermanentError) as err:
+            except nntp.failure_responses as err:
                 raise SystemExit(err)
             # EOF error: kill receiver and retry a few times
     
@@ -368,8 +367,7 @@ class NzbFile:
                     for _ in range(5):
                         try:
                             session["nntp"].body(id, file=decoder.pipe)
-                        except (NNTPTemporaryError, NNTPPermanentError) as \
-                        err:
+                        except nntp.failure_responses as err:
                             raise SystemExit(err)
                         except EOFError as err:
                             msg = format(err) or "Connection dropped"
@@ -378,8 +376,7 @@ class NzbFile:
                         else:
                             break
                         session["log"].write(msg + "\n")
-                        # TODO: time duration formatter
-                        session["log"].write("Connection lasted {:.0f}m\n".format((time.monotonic() - session["nntp"].connect_time)/60))
+                        session["nntp"].log_time()
                         decoder.pipe.close()
                         with suppress(EOFError):
                             cleanup.close()

@@ -15,8 +15,9 @@ option to reconnect after given time, to avoid server inconvenient
 
 # Part of API
 from nntplib import NNTPTemporaryError, NNTPPermanentError
+failure_responses = (NNTPTemporaryError, NNTPPermanentError)
 
-class NntpClient(Context):
+class Client(Context):
     def __init__(self, log,
     hostname, port=None, username=None, password=None, *,
     debuglevel=None, **timeout):
@@ -60,7 +61,7 @@ class NntpClient(Context):
                 with self.handle_abort():
                     self.nntp.body(id, *pos, **kw)
                 break
-            except (NNTPTemporaryError, NNTPPermanentError) as err:
+            except failure_responses as err:
                 [code, *msg] = err.response.split(maxsplit=1)
                 if code == "400":
                     [msg] = msg or (None,)
@@ -71,8 +72,7 @@ class NntpClient(Context):
                 else:
                     raise
             self.log.write(msg + "\n")
-            # TODO: time duration formatter
-            self.log.write("Connection lasted {:.0f}m\n".format((time.monotonic() - self.connect_time)/60))
+            self.log_time()
             if retry >= 60:
                 raise TimeoutError()
             self.close()
@@ -101,7 +101,7 @@ class NntpClient(Context):
     def handle_abort(self):
         try:
             yield
-        except (NNTPTemporaryError, NNTPPermanentError):
+        except failure_responses:
             raise  # NNTP connection still intact
         except:
             # Protocol is disrupted so abort the connection straight away
@@ -116,3 +116,7 @@ class NntpClient(Context):
         with suppress(NNTPError), self.nntp:
             pass
         self.nntp = None
+    
+    def log_time(self):
+        # TODO: time duration formatter
+        self.log.write("Connection lasted {:.0f}m\n".format((time.monotonic() - self.connect_time)/60))

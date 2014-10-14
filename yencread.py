@@ -40,15 +40,13 @@ class FileDecoder:
             self.SIZE_DIGITS)
         header["size"] = int(header["size"])
         
-        # Not treating quote characters specially, despite yEnc-Notes3.txt
-        # (2002) saying quotes should be removed if included, since other
-        # specifications do not mention quotes or are not as clear, and this
-        # is simpler. Also, not trimming leading or trailing spaces, since
-        # this is simpler, and there doesn't seem to be any evidence that
-        # unwanted spaces may be added.
         header["name"] = yield from self.pipe.read_delimited(b"\n",
             self.NAME_CHARS)
-        header["name"] = header["name"].rstrip(b"\r").decode("ascii")
+        header["name"] = header["name"].strip()
+        if (header["name"].startswith(b'"') and
+        header["name"].endswith(b'"') and header["name"] != b'"'):
+            header["name"] = header["name"][1:-1]
+        header["name"] = header["name"].decode("ascii")
         
         if (yield from self.pipe.consume_match(b"=ypart begin=")):
             header["begin"] = yield from self.pipe.read_delimited(b" end=",

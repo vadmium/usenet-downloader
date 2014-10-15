@@ -361,8 +361,11 @@ class NzbFile:
                         session["log"].write(msg + "\n")
                         session["nntp"].log_time()
                         decoder.pipe.close()
+                        
+                        # Decoder coroutine raises EOFError if input aborted
                         with suppress(EOFError):
                             cleanup.close()
+                        
                         session["nntp"].connect()
                         pipe = PipeWriter()
                         decoder = yencread.FileDecoder(session["log"], pipe)

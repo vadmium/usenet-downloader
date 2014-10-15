@@ -66,7 +66,7 @@ def main(address=None, server=None, debuglevel=None):
                     address.hostname, port, username, password,
                     debuglevel=debuglevel, timeout=60)
                 main.nntp = cleanup.enter_context(main.nntp)
-            except nntp.NNTPPermanentError as err:
+            except (nntp.NNTPPermanentError,) + timeouts as err:
                 raise SystemExit(err)
         yield main
 
@@ -354,7 +354,7 @@ class NzbFile:
                             raise SystemExit(err)
                         except EOFError as err:
                             msg = format(err) or "Connection dropped"
-                        except (socket.timeout, TimeoutError) as err:
+                        except timeouts as err:
                             msg = format(err)
                         else:
                             break
@@ -412,6 +412,8 @@ class NzbFile:
                     raise ValueError(segment.tag)
                 [id] = segment.itertext()
                 yield (segment, id)
+
+timeouts = (socket.timeout, TimeoutError)
 
 if __name__ == "__main__":
     import clifunc

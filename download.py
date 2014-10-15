@@ -4,7 +4,6 @@ from shorthand import chunks
 import struct
 from misc import Context
 from io import SEEK_CUR
-from log import Progress
 
 """
 TODO:
@@ -27,7 +26,6 @@ pre-allocate space
 class Download(Context):
     def __init__(self, log, path):
         # TODO: form OS path and/or validate it
-        self.log = log
         self.path = path
         
         self.control_path = self.path + ".aria2"
@@ -38,11 +36,8 @@ class Download(Context):
             
             # If data file exists without control file, assume complete
             self.complete = os.path.exists(self.path)
-            if self.complete:
-                self.log.write("{}: assuming complete\n".format(self.path))
         else:
             try:
-                self.log.write("{}: resuming\n".format(self.path))
                 self.complete = False
                 
                 # TODO: treat truncated file as for new file
@@ -65,6 +60,13 @@ class Download(Context):
                 self.control.close()
                 raise
         self.file = None
+    
+    def is_complete(self, log):
+        if self.complete:
+            log.write("{}: assuming complete\n".format(self.path))
+        elif self.control:
+            log.write("{}: resuming\n".format(self.path))
+        return self.complete
     
     def open(self, total_length, piece_length):
         if self.control:
@@ -109,7 +111,6 @@ class Download(Context):
             self.file.close()
         if self.control:
             try:
-                Progress.close(self.log)
                 if not exc_value:
                     self.control.seek(self.bitfield)
                     pieces = chunks(self.total_length, self.piece_length)

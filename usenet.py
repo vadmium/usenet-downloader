@@ -16,6 +16,7 @@ from log import format_size
 import nntp
 from download import Download
 import yencread
+from log import Progress
 
 """
 TODO:
@@ -175,8 +176,8 @@ def id_receive(log, pipe):
         name = yield from pipe.read_delimited(b"\n",
             yencread.FileDecoder.NAME_CHARS)
         name = name.rstrip(b"\r").decode("ascii")
-        with Download(log, name) as download:
-            if download.complete:
+        with Download(name) as download:
+            if download.is_complete(log):
                 return
             if download.control:
                 raise SystemExit("Cannot resume UU-encoded download")
@@ -212,14 +213,17 @@ def id_receive(log, pipe):
         log.write(", {}".format(format_size(size)))
     log.write("\n")
     
-    with Download(log, header["name"]) as download:
-        if download.complete:
+    with Download(header["name"]) as download:
+        if download.is_complete(log):
             return
         # TODO: handle omitted size; if given, make sure it is not ridiculously high
         download.open(header["size"], header["size"])
         if not download.is_done(0):
-            yield from decoder.decode_part(download.file, header)
-            download.set_done(0)
+            try:
+                yield from decoder.decode_part(download.file, header)
+                download.set_done(0)
+            finally:
+                Progress.close(log)
 
 def parse_nzb(stream, include=None):
     nzb = ElementTree.parse(stream).getroot()
@@ -331,8 +335,8 @@ class NzbFile:
     
     def transfer(self, session):
         path = os.path.join(self.release, self.name)
-        with Download(session["log"], path) as download:
-            if download.complete:
+        with Download(path) as download:
+            if download.is_complete(session["log"]):
                 return
             
             bytes = format_size(self.bytes)
@@ -343,6 +347,7 @@ class NzbFile:
                 decoder = yencread.FileDecoder(session["log"], PipeWriter())
                 coroutine = self._receive(download, decoder)
                 cleanup.enter_context(decoder.pipe.coroutine(coroutine))
+                cleanup.callback(Progress.close, session["log"])
                 for [segment, id] in self.iter_segments():
                     number = int(segment.get("number")) - 1
                     if download.is_done(number):

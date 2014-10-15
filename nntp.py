@@ -44,13 +44,13 @@ class Client(Context):
             cleanup.push(self)
             if self.debuglevel is not None:
                 self.nntp.set_debuglevel(self.debuglevel)
-            self.nntp.getwelcome()
+            self.log.write("{}\n".format(self.nntp.getwelcome()))
             
             if self.username is not None:
-                self.log.write("Logging in\n")
+                self.log.write("Logging in as {}\n".format(self.username))
                 with self.handle_abort():
                     self.nntp.login(self.username, self.password)
-            self.log.write("Connected\n")
+                self.log.write("Logged in\n")
             cleanup.pop_all()
     
     def body(self, id, *pos, **kw):

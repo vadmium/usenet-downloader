@@ -5,6 +5,7 @@ from coropipe import PipeWriter
 import re
 from io import BufferedIOBase
 from log import Progress
+from warnings import warn
 
 class FileDecoder:
     def __init__(self, log, pipe):
@@ -119,11 +120,15 @@ class FileDecoder:
         if file.tell() != header["end"]:
             raise ValueError(header["end"])
         
-        expected = "end size={} part={} pcrc32={}\r\n"
+        expected = "end size={} part={} pcrc32="
         size = header["end"] - header["begin"]
-        crc = decoder.getCrc32()
-        expected = expected.format(size, 1 + header["part"], crc)
+        expected = expected.format(size, 1 + header["part"])
         yield from self.pipe.expect(expected.encode("ascii"))
+        crc = decoder.getCrc32()
+        stated = yield from self.pipe.read_delimited(b"\r\n", 8)
+        if int(stated, 16) != int(crc, 16):
+            msg = "Calculated part CRC {} != stated pcrc32={}"
+            raise ValueError(msg.format(crc, stated))
         
         # TODO: explicitly detect second yEnc object and report as error,
         # since this is specifically allowed

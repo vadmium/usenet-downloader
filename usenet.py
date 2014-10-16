@@ -217,11 +217,11 @@ def id_receive(log, pipe):
         if download.is_complete(log):
             return
         # TODO: handle omitted size; if given, make sure it is not ridiculously high
-        download.open(header["size"], header["size"])
-        if not download.is_done(0):
+        control = download.open(header["size"], header["size"])
+        if not control.is_done(0):
             try:
                 yield from decoder.decode_part(download.file, header)
-                download.set_done(0)
+                control.set_done(0)
             finally:
                 Progress.close(log)
 
@@ -394,24 +394,24 @@ class NzbFile:
             chunking = header["end"] - header["begin"]
         decoder.validate_header(header, chunking)
         
-        download.open(header["size"], chunking)
+        control = download.open(header["size"], chunking)
         yield from decoder.decode_part(download.file, header)
         # TODO: base on size if no total; empty dict if neither
-        download.set_done(header["part"])
+        control.set_done(header["part"])
         
         while True:
             header = yield from decoder.parse_header()
             if not header:
                 return
-            if header["size"] != download.total_length:
+            if header["size"] != control.total_length:
                 raise ValueError(header["size"])
             if header["name"] != self.name:
                 raise ValueError(header["name"])
             # TODO: validate header more; use download.piece_length
-            if download.is_done(header["part"]):
+            if control.is_done(header["part"]):
                 continue
             yield from decoder.decode_part(download.file, header)
-            download.set_done(header["part"])
+            control.set_done(header["part"])
     
     def iter_segments(self):
         for element in self.nzb.iterfind(NZB + "segments"):

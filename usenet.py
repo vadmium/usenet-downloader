@@ -1,5 +1,15 @@
 #! /usr/bin/env python3
 
+"""Usenet file grabber
+
+See main() function for command line invocation.
+
+Related projects:
+
+* nget, <http://nget.sourceforge.net/>: No NZB support
+* SAB nzbd, <http://sabnzbd.org/>: Server that runs in the background
+"""
+
 import net
 from shorthand import bitmask
 from sys import stdin, stdout
@@ -33,6 +43,7 @@ NZB = "{http://www.newzbin.com/DTD/2003/nzb}"
 @attributes(param_types=dict(debuglevel=int), cli_context=True)
 @contextmanager
 def main(address=None, server=None, debuglevel=None):
+    """Usenet file grabber"""
     if address is not None:
         address = net.Url(netloc=address)
         port = address.port

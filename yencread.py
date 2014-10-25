@@ -36,11 +36,14 @@ class FileDecoder:
             header["total"] = yield from self.pipe.read_delimited(
                 b" ", self.PART_DIGITS)
             header["total"] = int(header["total"])
-        yield from self.pipe.expect(b"line=128 size=")
-        header["size"] = yield from self.pipe.read_delimited(b" name=",
+        yield from self.pipe.consume_match(b"line=128 ")
+        yield from self.pipe.expect(b"size=")
+        header["size"] = yield from self.pipe.read_delimited(b" ",
             self.SIZE_DIGITS)
         header["size"] = int(header["size"])
+        yield from self.pipe.consume_match(b"line=128 ")
         
+        yield from self.pipe.expect(b"name=")
         header["name"] = yield from self.pipe.read_delimited(b"\n",
             self.NAME_CHARS)
         header["name"] = header["name"].strip()
@@ -125,7 +128,8 @@ class FileDecoder:
         expected = expected.format(size, 1 + header["part"])
         yield from self.pipe.expect(expected.encode("ascii"))
         crc = decoder.getCrc32()
-        stated = yield from self.pipe.read_delimited(b"\r\n", 8)
+        stated = yield from self.pipe.read_delimited(b"\r\n", 80)
+        stated = stated.split(b" ", 1)[0]
         if int(stated, 16) != int(crc, 16):
             msg = "Calculated part CRC {} != stated pcrc32={}"
             raise ValueError(msg.format(crc, stated))

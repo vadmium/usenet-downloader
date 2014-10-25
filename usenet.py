@@ -17,6 +17,7 @@ import nntp
 from download import Download
 import yencread
 from log import Progress
+from warnings import warn
 
 """
 TODO:
@@ -318,7 +319,7 @@ class NzbFile:
         subject = self.nzb.get("subject").rsplit('"', 2)
         [self.release, self.name, yenc] = subject
         if "yEnc" not in yenc:
-            raise ValueError(yenc)
+            warn('Expected "yEnc" tag within {!r}'.format(yenc))
         try:
             [self.release, _] = self.release.rsplit(" ]", 1)  # TODO: always jump to 2nd last bracketted box
             [_, self.release] = self.release.rsplit("[ ", 1)  # TODO: skip nested brackets

@@ -52,7 +52,27 @@ class PipeWriter(BufferedIOBase):
         self.buffer = self.buffer[1:]
         return data
     
-    def read_delimited(self, delimiter, size):
+    def read_delimited(self, delimiters, size):
+        scope = size
+        field = BytesIO()
+        while True:
+            found = scope + 1
+            for d in delimiters:
+                try:
+                    found = self.buffer.find(d, None, found)
+                except ValueError:
+                    pass
+            if found <= scope:
+                break
+            if len(self.buffer) > scope:
+                raise OverflowError("Field length > {!r}".format(size))
+            scope -= field.write(self.buffer)
+            self.buffer = yield
+        field.write(self.buffer[:found])
+        self.buffer = self.buffer[found + 1:]
+        return (field.getvalue(), self.buffer[found:found + 1])
+    
+    def read_until_string(self, delimiter, size):  # Unused
         remaining = size
         field = BytesIO()
         while True:

@@ -29,22 +29,22 @@ class FileDecoder:
             yield from self.pipe.expect(b"=ybegin part=")
         except EOFError:
             return None
-        header["part"] = yield from self.pipe.read_delimited(b" ",
+        [header["part"], _] = yield from self.pipe.read_delimited(b" ",
             self.PART_DIGITS)
         header["part"] = int(header["part"]) - 1
         if (yield from self.pipe.consume_match(b"total=")):
-            header["total"] = yield from self.pipe.read_delimited(
+            [header["total"], _] = yield from self.pipe.read_delimited(
                 b" ", self.PART_DIGITS)
             header["total"] = int(header["total"])
         yield from self.pipe.consume_match(b"line=128 ")
         yield from self.pipe.expect(b"size=")
-        header["size"] = yield from self.pipe.read_delimited(b" ",
+        [header["size"], _] = yield from self.pipe.read_delimited(b" ",
             self.SIZE_DIGITS)
         header["size"] = int(header["size"])
         yield from self.pipe.consume_match(b"line=128 ")
         
         yield from self.pipe.expect(b"name=")
-        header["name"] = yield from self.pipe.read_delimited(b"\n",
+        [header["name"], _] = yield from self.pipe.read_delimited(b"\n",
             self.NAME_CHARS)
         header["name"] = header["name"].strip()
         if (header["name"].startswith(b'"') and
@@ -53,10 +53,11 @@ class FileDecoder:
         header["name"] = header["name"].decode("ascii")
         
         if (yield from self.pipe.consume_match(b"=ypart begin=")):
-            header["begin"] = yield from self.pipe.read_delimited(b" end=",
+            [header["begin"], _] = yield from self.pipe.read_delimited(b" ",
                 self.SIZE_DIGITS)
             header["begin"] = int(header["begin"]) - 1
-            header["end"] = yield from self.pipe.read_delimited(b"\n",
+            yield from self.pipe.expect(b"end=")
+            [header["end"], _] = yield from self.pipe.read_delimited(b"\n",
                 self.SIZE_DIGITS)
             header["end"] = int(header["end"])
         # TODO: make sure part size is not ridiculously huge
@@ -128,11 +129,13 @@ class FileDecoder:
         expected = expected.format(size, 1 + header["part"])
         yield from self.pipe.expect(expected.encode("ascii"))
         crc = decoder.getCrc32()
-        stated = yield from self.pipe.read_delimited(b"\r\n", 80)
-        stated = stated.split(b" ", 1)[0]
+        [stated, delim] = yield from self.pipe.read_delimited(b" \r\n", 8)
         if int(stated, 16) != int(crc, 16):
             msg = "Calculated part CRC {} != stated pcrc32={}"
             raise ValueError(msg.format(crc, stated))
+        
+        if delim != b"\n":
+            yield from self.pipe.read_delimited(b"\n", 30)
         
         # TODO: explicitly detect second yEnc object and report as error,
         # since this is specifically allowed

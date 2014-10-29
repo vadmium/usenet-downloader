@@ -174,7 +174,7 @@ def id_receive(log, pipe):
     
     if (yield from pipe.consume_match(b"begin ")):
         yield from pipe.read_delimited(b" ", 30)
-        name = yield from pipe.read_delimited(b"\n",
+        [name, _] = yield from pipe.read_delimited(b"\n",
             yencread.FileDecoder.NAME_CHARS)
         name = name.rstrip(b"\r").decode("ascii")
         with Download(name) as download:
@@ -192,11 +192,13 @@ def id_receive(log, pipe):
                 if length < 32 or length > 96:
                     raise ValueError(length)
                 length = chunks(((length - 32) & bitmask(6)) * 8, 6)
-                line = yield from pipe.read_delimited(b"\n", length + 10)
+                [line, _] = yield from pipe.read_delimited(b"\n",
+                    length + 10)
                 download.file.write(a2b_uu(start + line[:length]))
-            yield from pipe.expect(b"nd")
-            if (yield from pipe.read_delimited(b"\n", 10)).strip():
-                raise ValueError()
+            yield from pipe.expect(b"end"[1:])
+            [eol, _] = yield from pipe.read_delimited(b"\n", 10)
+            if eol.strip():
+                raise ValueError(eol)
         return
     decoder = yencread.FileDecoder(log, pipe)
     header = yield from decoder.parse_header()

@@ -157,7 +157,7 @@ class Main:
                 else:
                     size = sum(v.bytes for v in volumes.values())
                     if len(volumes) > 1:
-                        ext = "rar-r{:02}".format(len(volumes) - 1)
+                        ext = "rar-r{:02}".format(len(volumes) - 2)
                     else:
                         ext = "rar"
                     size = format_size(size)

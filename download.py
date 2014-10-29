@@ -106,6 +106,8 @@ class ControlFile(Context):
         return bits >> (8 - 1 - bit) & 1
     
     def __repr__(self):
+        if self.file.closed:
+            return "<{} closed>".format(type(self).__name__)
         done = list()
         self.file.seek(self.bitfield)
         pieces = chunks(self.total_length, self.piece_length)
@@ -173,7 +175,7 @@ class Download(Context):
         if self.control:
             try:
                 if not exc_value and not self.control.all_done():
-                    raise ValueError(self.control)
+                    raise ValueError(repr(self.control))
             finally:
                 self.control.close()
             if not exc_value:

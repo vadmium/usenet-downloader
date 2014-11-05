@@ -1,3 +1,5 @@
+#! /usr/bin/env python3
+
 import net
 from shorthand import bitmask
 from sys import stdin, stdout

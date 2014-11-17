@@ -46,7 +46,7 @@ class FileDecoder:
         yield from self.pipe.expect(b"name=")
         [header["name"], _] = yield from self.pipe.read_delimited(b"\n",
             self.NAME_CHARS)
-        header["name"] = header["name"].strip()
+        header["name"] = header["name"].rstrip()
         if (header["name"].startswith(b'"') and
         header["name"].endswith(b'"') and header["name"] != b'"'):
             header["name"] = header["name"][1:-1]

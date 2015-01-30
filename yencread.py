@@ -69,7 +69,7 @@ class FileDecoder:
         size = header.get("size")
         total = header.get("total")
         if (size is not None and total is not None and
-        ceildiv(size, chunking) != total):
+                ceildiv(size, chunking) != total):
             raise ValueError(header)
         
         [number, remainder] = divmod(header["begin"], chunking)

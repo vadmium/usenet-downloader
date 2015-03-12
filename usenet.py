@@ -7,7 +7,7 @@ from xml.etree import ElementTree
 from fnmatch import fnmatchcase
 import os, os.path
 from contextlib import ExitStack, contextmanager, suppress
-from shorthand import chunks
+from shorthand import ceildiv
 from coropipe import PipeWriter
 import socket
 from functions import attributes
@@ -193,7 +193,7 @@ def id_receive(log, pipe):
                 [length] = start
                 if length < 32 or length > 96:
                     raise ValueError(length)
-                length = chunks(((length - 32) & bitmask(6)) * 8, 6)
+                length = ceildiv(((length - 32) & bitmask(6)) * 8, 6)
                 [line, _] = yield from pipe.read_delimited(b"\n",
                     length + 10)
                 download.file.write(a2b_uu(start + line[:length]))

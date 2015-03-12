@@ -1,6 +1,6 @@
 from shorthand import bitmask
 from contextlib import ExitStack, closing
-from shorthand import chunks
+from shorthand import ceildiv
 from coropipe import PipeWriter
 import re
 from io import BufferedIOBase
@@ -69,7 +69,7 @@ class FileDecoder:
         size = header.get("size")
         total = header.get("total")
         if (size is not None and total is not None and
-        chunks(size, chunking) != total):
+        ceildiv(size, chunking) != total):
             raise ValueError(header)
         
         [number, remainder] = divmod(header["begin"], chunking)

@@ -1,6 +1,6 @@
 from shorthand import bitmask
 import os, os.path
-from shorthand import chunks
+from shorthand import ceildiv
 import struct
 from misc import Context
 from io import SEEK_CUR
@@ -39,7 +39,7 @@ class ControlFile(Context):
                 "!LQ", self.file.read(4 + 8))
             self.file.seek(+8, SEEK_CUR)
             [bitfield_length] = struct.unpack("!L", self.file.read(4))
-            minimum = chunks(self.total_length, self.piece_length * 8)
+            minimum = ceildiv(self.total_length, self.piece_length * 8)
             if bitfield_length < minimum:
                 raise ValueError(bitfield_length, minimum)
             self.bitfield = self.file.tell()
@@ -61,7 +61,7 @@ class ControlFile(Context):
             VERSION, EXTENSION, INFO_HASH_LENGTH))
         
         UPLOAD_LENGTH = 0
-        bitfield_length = chunks(self.total_length, self.piece_length * 8)
+        bitfield_length = ceildiv(self.total_length, self.piece_length * 8)
         self.file.write(struct.pack("!LQQL",
             self.piece_length, self.total_length, UPLOAD_LENGTH,
             bitfield_length,
@@ -78,7 +78,7 @@ class ControlFile(Context):
     
     def all_done(self):
         self.file.seek(self.bitfield)
-        pieces = chunks(self.total_length, self.piece_length)
+        pieces = ceildiv(self.total_length, self.piece_length)
         [bytes, bits] = divmod(pieces, 8)
         bitfield = self.file.read(bytes)
         if not all(byte == bitmask(8) for byte in bitfield):
@@ -110,7 +110,7 @@ class ControlFile(Context):
             return "<{} closed>".format(type(self).__name__)
         done = list()
         self.file.seek(self.bitfield)
-        pieces = chunks(self.total_length, self.piece_length)
+        pieces = ceildiv(self.total_length, self.piece_length)
         index = 0
         while True:
             pieces -= 8
